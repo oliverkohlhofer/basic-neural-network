@@ -1,6 +1,8 @@
 # Basic Neural Network from Scratch
 
-A small, educational implementation of a fully connected neural network for handwritten digit classification on **MNIST**. The goal is to make the mathematics behind **forward propagation, backpropagation, cross-entropy loss, and gradient descent** visible in straightforward Python code.
+A small, educational implementation of a fully connected neural network for handwritten digit classification on **MNIST**. The goal is to make the mathematics behind **forward propagation, backpropagation, cross-entropy loss, and gradient descent** visible in straightforward Python code. 
+
+The idea is to show the low-level mathematics of a neural network, which usually is in packages/frameworks for ML/DL, and how easy it can be implemented it python.
 
 The neural network itself is implemented using **NumPy**, without a neural-network training framework or automatic differentiation. **TensorFlow/Keras is used only to download MNIST.**
 
@@ -11,7 +13,9 @@ The neural network itself is implemented using **NumPy**, without a neural-netwo
 - Measuring classification error with categorical cross-entropy
 - Deriving and implementing gradients using the chain rule
 - Updating weights and biases with batch gradient descent
-- Tracking training loss and classification accuracy
+- Tracking training and test loss and classification accuracy
+- Evaluating held-out images and predicting a single handwritten digit
+- Plotting learning curves and checking softmax numerical stability
 
 ## Network architecture
 
@@ -48,7 +52,7 @@ cd basic-neural-network
 Install the dependencies:
 
 ```bash
-python -m pip install numpy tensorflow jupyter
+python -m pip install numpy tensorflow matplotlib jupyter
 ```
 
 Open the example notebook:
@@ -57,7 +61,63 @@ Open the example notebook:
 jupyter notebook test_notebook.ipynb
 ```
 
-The MNIST dataset is downloaded automatically on first use. `model_gd.py` defines the model and training methods; the notebook provides the interactive entry point.
+The MNIST dataset is downloaded automatically on first use. `model_gd.py` defines training, evaluation, and prediction methods. The notebook walks through data inspection, training, test-set evaluation, single-image prediction, learning curves, and a softmax stability check, with Markdown explanations for each step.
+
+### Train, evaluate, and predict
+
+```python
+from mnist_dataset import Dataset
+from model_gd import Model
+
+Data = Dataset(n_train=1000, n_test=100)
+X_train, Y_train, X_test, Y_test = Data.get_mnist_data()
+
+model = Model(learning_rate=0.1, epochs=1000)
+model.train(X_train, Y_train)
+
+accuracy = model.test(X_test, Y_test)
+print(f"Test accuracy: {accuracy:.2%}")
+
+image = X_test[:, 0].reshape(28, 28)
+digit, probabilities = model.predict(image)
+print(f"Predicted digit: {digit}")
+print(f"Probability assigned to prediction: {probabilities[digit]:.2%}")
+```
+
+Training stores the learned parameters in `model.W1`, `model.b1`, `model.W2`, and `model.b2`. Call `train` before `test` or `predict`; both use those stored parameters without updating them. `test` expects normalized inputs of shape `(784, m)` and one-hot labels of shape `(10, m)`, and returns accuracy as a fraction.
+
+`predict` expects a grayscale 28 ? 28 image normalized to `[0, 1]`. It returns an integer digit and an array of 10 probabilities, indexed by digit. Images from `Dataset` are already normalized. For an external image with values from 0?255, convert to floating point and divide by 255 once. Match MNIST's light digits on a dark background. A high output probability does not guarantee correctness.
+
+### Track and plot learning curves
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+
+train_loss, train_acc, test_loss, test_acc = model.train(
+    X_train, Y_train,
+    track_data=True,
+    Testset=(X_test, Y_test),
+)
+
+epochs = np.arange(1, len(train_loss) + 1)
+fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+axes[0].plot(epochs, train_loss, label="Training")
+axes[0].plot(epochs, test_loss, label="Test")
+axes[0].set_ylabel("Cross-entropy loss")
+axes[1].plot(epochs, train_acc, label="Training")
+axes[1].plot(epochs, test_acc, label="Test")
+axes[1].set_ylabel("Accuracy")
+for ax in axes:
+    ax.set_xlabel("Epoch")
+    ax.legend()
+plt.tight_layout()
+plt.show()
+```
+
+Every call to `train` initializes new parameters and starts training again. With `track_data=True`, it returns four lists in the order shown above, with one entry per epoch. Without tracking, it returns `None`. Without `Testset`, the two test histories remain empty. The argument name `Testset` is case-sensitive.
+
+Training histories use the forward pass before each parameter update; test histories use the parameters after that update. A growing gap between training and test performance can indicate overfitting. Use a validation split for repeated tuning and reserve the test set for final evaluation.
 
 ## Mathematical background
 
@@ -103,7 +163,7 @@ $$
 A^{[2]}_{k,i}=\frac{e^{Z^{[2]}_{k,i}}}{\sum_{j=1}^{10}e^{Z^{[2]}_{j,i}}}
 $$
 
-The ten probabilities for each image sum to one. The predicted digit is the index of the largest probability.
+The ten probabilities for each image sum to one. The predicted digit is the index of the largest probability. `Activation.softmax()` subtracts each column's maximum before exponentiation for numerical stability; this leaves the probabilities unchanged. The notebook checks that columns sum to one even for large positive and negative scores.
 
 ### 2. Loss function
 
@@ -278,7 +338,7 @@ Here $\odot$ means **element-wise multiplication**. If a hidden neuron's ReLU pr
 
 #### Step 6: Differentiate the hidden weights and biases
 
-Finally, $z^{[1]}_j=\sum_r W^{[1]}_{jr}x_r+b^{[1]}_j$, so
+Finally, $$z^{[1]}_j=\sum_r W^{[1]}_{jr}x_r+b^{[1]}_j$$, so
 
 $$
 \frac{\partial z^{[1]}_j}{\partial W^{[1]}_{jr}}=x_r,
@@ -362,12 +422,15 @@ Unlike cross-entropy, accuracy is an evaluation metric, not the differentiable t
 | Parameter updates | `Model.update_parameters()` |
 | Epoch loop | `Model.train()` |
 | Accuracy | `Model.accuracy()` |
+| Held-out test accuracy | `Model.test()` |
+| Single-image class and probabilities | `Model.predict()` |
+| Per-epoch loss and accuracy histories | `Model.train(..., track_data=True, Testset=(X_test, Y_test))` |
 
 ## Dataset and training details
 
 The loader shuffles the training and test splits independently before selecting subsets. Pixel intensities are scaled to $[0,1]$, images are flattened, and labels are converted to one-hot vectors. The default `Dataset` constructor requests 1,000 training and 1,000 test examples; the dataset instance in `model_gd.py` requests 1,000 training and 100 test examples.
 
-The model defaults to a learning rate of `0.01` and `1000` epochs. Training prints the loss and accuracy every 20 epochs. These are **training metrics**; evaluate predictions separately on held-out test data to measure generalization.
+The model defaults to a learning rate of `0.01` and `1000` epochs; the notebook uses a learning rate of `0.1`. Training prints training loss and accuracy every 20 epochs. Optional tracking records metrics every epoch, and `Model.test()` measures accuracy on held-out data after training. Random initialization and shuffled subsets mean results can vary between runs.
 
 ## Limitations and possible extensions
 
@@ -377,9 +440,8 @@ This is a learning project rather than a performance-optimized classifier. Usefu
 - Make the hidden-layer width configurable.
 - Use a fixed random seed for reproducible experiments.
 - Add numerical gradient checking to validate backpropagation.
-- Compare training and test accuracy and plot the loss curve.
 - Improve initialization (for example, He initialization for ReLU).
-- Implement a numerically stable softmax and log-softmax cross-entropy.
+- Compute cross-entropy directly from logits using log-softmax for improved numerical stability.
 
 ## Learning objective
 
