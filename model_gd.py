@@ -11,7 +11,9 @@ class Model:
     def __init__(self, learning_rate=0.01, epochs=1000):
         self.learning_rate = learning_rate
         self.epochs = epochs
-        self.W1, self.b1, self.W2, self.b2 = None, None, None, None  # Initialize weights and biases to None    
+        self.W1, self.b1, self.W2, self.b2 = None, None, None, None  # Initialize weights and biases to None 
+        self.input_dim = None
+        self.output_dim = None
 
 
     def parameter_init(self):
@@ -56,7 +58,11 @@ class Model:
         accuracy = np.mean(predictions == labels)
         return accuracy
 
-    def train(self, X, Y):
+    def train(self, X, Y, track_data:bool=False, Testset:tuple=None):
+        train_loss_data = []
+        train_acc_data = []
+        test_loss_data = []
+        test_acc_data = []
         self.input_dim = X.shape[0]
         self.output_dim = Y.shape[0]
         print(f"Input dim: {self.input_dim}, Output dim: {self.output_dim}")
@@ -67,6 +73,38 @@ class Model:
             W1, b1, W2, b2 = self.update_parameters(W1, b1, W2, b2, dW1, db1, dW2, db2, self.learning_rate)
             if epoch % 20 == 0:
                 print(f"Epoch {epoch}: Loss = {self.loss(Y, A2):.4f}, Accuracy = {self.accuracy(Y, A2):.4f}")
-        self.W1, self.b1, self.W2, self.b2 = W1, b1, W2, b2  # Store the trained weights and biases
+
+            # OPTIONAL: tracking data for process analysis:
+            if track_data:
+                train_loss_data.append(self.loss(Y,A2))
+                train_acc_data.append(self.accuracy(Y,A2))
+                if Testset is not None:
+                    try:
+                        _, _, _, A2_test = self.forward(Testset[0], W1, b1, W2, b2)
+                        test_acc_data.append(self.accuracy(Testset[1], A2_test))
+                        test_loss_data.append(self.loss(Testset[1], A2_test))
+                    except:
+                        print("An exception occurred at Test-Set")
+                        Testset = None
+                        
+        # Store the trained weights and biases:             
+        self.W1, self.b1, self.W2, self.b2 = W1, b1, W2, b2
+
+        if track_data:
+            return train_loss_data, train_acc_data, test_loss_data, test_acc_data
+        else:
+            return
+
+    def test(self, X_test, Y_test):
+        _, _, _, A2 = self.forward(X_test, self.W1, self.b1, self.W2, self.b2)
+        return self.accuracy(Y_test, A2)
+
+    def predict(self, image):
+        # Expects a 28x28 image already normalized to [0, 1].
+        X = np.asarray(image).reshape(784, 1)
+        _, _, _, A2 = self.forward(X, self.W1, self.b1, self.W2, self.b2)
+        digit = int(np.argmax(A2[:, 0]))
+        return (digit, A2[:, 0])
+
     
     
